@@ -51,6 +51,9 @@ This command downloads and sets up Browsertrix using Docker.
 
 **Note**: If this command throws an error, you might not have administrative permissions. Try the above command again, but put `sudo` at the front, so the command would be: `sudo docker pull webrecorder/browsertrix-crawler`
 
+If you installed Browsertrix a while ago, you may want to update your version with the following command:
+`docker pull webrecorder/browsertrix-crawler:latest`
+
 Now that you've installed Docker and configured the Docker image, you shouldn't need to redo these first setup steps again. 
 
 ## Picking a website from the spreadsheet
@@ -87,6 +90,8 @@ Here's the fields you should modify each time:
 * `collection:` this should be basically the URL that you scrape, but with hyphens instead of periods in the URL. So *http://archangel.kiev.ua* becomes `collection: archangel-kiev-ua`
 * `url:` this is just the base URL in the SUCHO spreadsheet for the URL you're scraping
 
+(**Tip:** If you're not sure if the site (and everything in it) uses http or https, you can write the URL with a question mark after the s, like so: `https?://www.examplesite.ua`)
+
 Save the YAML file as `crawl-config.yaml` somewhere easy to navigate to on your computer -- on a Mac, the Documents folder is a good one. You will need to be able to change your directory using the command line to where your *crawl-config.yaml* file is saved on your computer to run the Docker command from that directory when you crawl the site. 
 
 For examples of `crawl-config.yaml` files used for the SUCHO project, see our separate Github repository, [browsertrix-yaml-examples](https://github.com/sucho-archiving/browsertrix-yaml-examples).
@@ -98,10 +103,10 @@ Open up the command line again, if you closed it before.
 
 Once you're in the same location as your *crawl-config.yaml*, paste this command into the Mac terminal and press enter to start the crawling:
 
-`docker run -v $PWD/crawl-config.yaml:/app/crawl-config.yaml -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --text --generateWACZ`
+`docker run -v $PWD/crawl-config.yaml:/app/crawl-config.yaml -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --generateWACZ`
 
 *For Windows*: after navigating to the right directory in the command prompt using `cd`, type the following command:
-`docker run -v %cd%/crawl-config.yaml:/app/crawl-config.yaml -v %cd%/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --text --generateWACZ`
+`docker run -v %cd%/crawl-config.yaml:/app/crawl-config.yaml -v %cd%/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --generateWACZ`
 
 ### Troubleshooting the crawl command
 You may have to use 'sudo' at the start of this command. 
@@ -118,14 +123,54 @@ Depending on the size of the site, the crawl could take anywhere from a couple m
 ### Interruptions
 If the crawl gets interrupted, or you need to interrupt the execution in the command line, browsertrix should be able pick up where it left off if you run a slightly different crawl command. 
 
-This is an example you would need to modify for your case: `docker run -v $PWD/crawls/collections/history-org-ua/crawls/crawl-20220305161714-00e289c2da70.yaml:/app/crawl-config.yaml -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --generateWACZ --text --timeout 120`
+To interrupt the crawl, for Mac and Linux, simply press Cntrl+C in the terminal. For Windows, Cntrl+Break may work, or try `docker ps` and then `docker kill -s SIGINT <container ID>`. 
 
-The first argument now points to crawls/collections/....../crawl-[LOTSOFNUMBERS].yaml
+Interrupting the crawl should save the state to a .yaml file and it should print "Saving crawl state to: /crawls/collections...". Find that .yaml file and open it with a text editor. 
 
-If the crawl fails for any number of reasons, change the status to Failed and add notes about the errors and problems in the Comments field. Another person can try recrawling the site later with more complex parameters, or we may turn it over to manual webrecording tools. 
+In the yaml file, add an `exclude: <regex>` at the beginning in the root of the yaml file, to exclude any url that contains a query `?`. You can also add `exclude:"\\?"` to escape the ? for the regex. The pattern of the url that should be excluded may be a specific part of the URL.
+
+Restart the crawl by running it with `--config /crawls/collections/...` pointing to the edited yaml file (it'll be in the crawls volume, accessible from /crawls). The restarted crawl will apply new exclusion rules to the crawl and filter out any urls in the crawl state, so the crawl can hopefully finish. You can repeat this process as many times as necessary.
+
+See more info on Exclusions below. 
+
+Here is an example of a full command that would need to be modified to your crawl-[UNIQUEID].yaml: `docker run -v $PWD/crawls/collections/history-org-ua/crawls/crawl-20220305161714-00e289c2da70.yaml:/app/crawl-config.yaml -v $PWD/crawls:/crawls/ webrecorder/browsertrix-crawler crawl --config /app/crawl-config.yaml --generateWACZ --timeout 120`
 
 ### Timeouts
 If webpages fail to load and timeout, you may need to manually set browsertrix to a longer timeout limit by adding to the end of your command `--timeout 300`. Timeouts are tricky, so if you can't get it working, make a comment and move on to another open item. 
+
+If the crawl consistently fails for any number of reasons, change the status to Failed and add notes about the errors and problems in the Comments field. Another person can try recrawling the site later with more complex parameters, or we may turn it over to manual webrecording tools. 
+
+*Note*: Just because during a crawl you receive error messages relating to timeouts, it dooesn't always mean the URL couldn't be captured (it may have been a single resource on the page, such as an image from a non-existent third party site). View the final .wacz file in ReplayWeb to see what failed about any given page.
+
+#### Scraping Failed Pages
+
+For advanced users, if specific pages fail during your crawl, you can use this [script](https://github.com/ZoeLeBlanc/sucho_scripts) to take the failed links from your crawl, check if they exist in the Wayback Machine, and if not, you can either save it to a csv and upload it to Google Sheets to send to the Wayback service, or save it directly to the Wayback Machine. 
+
+### Exclusions
+
+If you have a crawl that seems to not be finishing and appears to be stuck in a loop, you can interrupt it, and add an exclusion regular expression, and then continue! It's a bit cumbersome, but you can:
+
+1. Interrupt the crawl with ctrl+c (except probably windows)
+2. This should interrupt the crawl and save the state to a yaml file and it should print "Saving crawl state to: /crawls/collections..."
+3. Open that yaml file in a text editor ./crawls/collections/...
+4. Add an `exclude: <regex>` field, can be at the beginning in the root of the yaml file. See below for examples of how to set up the regex.
+5. Restart the crawl by running it with `--config /crawls/collections/...` pointing to the edited yaml file (it'll be in the crawls volume so will be accessible from /crawls)
+6. The restarted crawl will apply the new exclusion rules to the crawl and filter out any urls in the crawl state, so hopefully now your crawl can finish.
+You can do this as many times as needed to update the exclusion rules.
+
+#### Exclusion examples and tips
+
+* To exclude everything that comes after /directory/ (e.g. `/directory/thing1`, `directory/thing2`), you can use: `https?://www.site.ua/directory/.*`
+* If you have a list of paths you want to exclude you can add one regex per path, or you can combine them into one regex; the former is likely to be cleaner, easier to follow, and less error-prone, e.g.:
+
+```
+ - url: https://example.site.com
+    scopeType: domain
+    exclude:
+      - https?://example.site.com/path1/.*
+      - https?://example.site.com/path2/.*
+      - https?://example.site.com/path3/.*`
+```
 
 ## Final Step: Uploading the WACZ file
 The directory that has your *crawl-config.yaml* file will generate a *crawls* directory the first time you run the command to crawl a site. To find the WACZ file containg the archive of the website, open the  *crawls* folder, then the *collections* folder. Inside *collections*, you should see a folder for each collection you've crawled. Inside the collection folder is a .wacz file.
@@ -144,13 +189,7 @@ Please mark in the spreadsheet the row's status as "Submitted," and continue on 
 ### For uploads of less than 10 GB
 If your Google Drive account doesn't have enough free space for the uploaded file, you will get a "Server Rejected" error message.  First, see if you can delete any previously submitted wacz files from your drive.  If you can, this may free up enough space.  If the upload still fails, try to upload it to your Drive first, and then use the "add from google drive" option in the form.  If that still doesn't work, see the section for "For uploads greater than 10GB".
 ### For uploads greater than 10GB
-DM (direct/private message) @Seb in slack for sftp credentials. Transfer the file directly with sftp and update the Google Sheets worksheet with the metadata you would have entered in the Google form.
-The stfp command will look like this
-
-  `rsync -aRv --rsh='ssh -p<port>' crawls/collections/<coll>/<coll.wacz> <username>@<server_address>:.`
-  
-Replace the <port>, <username> and <server_address> with the credentails Seb will provide, and <site-collection>, <site-collection.wacz> sections with the file address of the file you'd like to upload. 
-Enter your provided password when prompted.
+For WACZ files that are larger than 10GB, please follow these [instructions to upload with the AWS tool](/wacz-upload-aws).
 
 ## Recreating the WACZ file
 
